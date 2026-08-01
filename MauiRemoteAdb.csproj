@@ -1,0 +1,70 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Chỉ target Android vì app này chỉ chạy trên Android (điều khiển thiết bị Android khác) -->
+    <TargetFrameworks>net8.0-android</TargetFrameworks>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>MauiRemoteAdb</RootNamespace>
+    <UseMaui>true</UseMaui>
+    <SingleProject>true</SingleProject>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <ApplicationTitle>Remote ADB</ApplicationTitle>
+    <ApplicationId>com.example.mauiremoteadb</ApplicationId>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+
+    <SupportedOSPlatformVersion>24.0</SupportedOSPlatformVersion>
+    <!-- API 24 (Android 7.0) tối thiểu để MediaCodec + socket ổn định -->
+
+    <!-- QUAN TRỌNG: ép build ra ĐÚNG 1 kiến trúc arm64-v8a (khớp file libadb.so đã
+         bundle) — nếu không, build Release có thể xuất ra .aab (Android App Bundle)
+         chia theo nhiều ABI khác nhau; nếu bạn cài sai cách (không đúng gói APK khớp
+         kiến trúc máy, ví dụ cài universal APK generic thay vì bản split đúng abi),
+         file libadb.so/libz.so... có thể bị thiếu khỏi gói cài đặt thực tế, dẫn tới lỗi
+         "Không tìm thấy binary adb đã bundle" dù project source vẫn có đủ file.
+         Đặt RuntimeIdentifiers cụ thể buộc build luôn ra APK đơn kiến trúc, tránh hẳn
+         vấn đề chia APK theo ABI. -->
+    <RuntimeIdentifiers>android-arm64</RuntimeIdentifiers>
+    <AndroidPackageFormat>apk</AndroidPackageFormat>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#512BD4" />
+    <MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#512BD4" BaseSize="128,128" />
+    <MauiImage Include="Resources\Images\*" />
+    <MauiFont Include="Resources\Fonts\*" />
+    <MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
+    <MauiAsset Remove="Resources\Raw\PLACEHOLDER.txt" />
+    <!-- scrcpy-server.jar sẽ tự động được đóng gói bởi wildcard trên khi bạn copy nó
+         vào Resources\Raw\scrcpy-server.jar — không cần khai báo riêng. -->
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Binary adb (đổi tên thành libadb.so) và các thư viện .so nó phụ thuộc
+      (lấy từ Termux android-tools, xem README mục Bước 0). protobuf kéo theo rất
+      nhiều file nhỏ của thư viện Abseil (libabsl_*.so) — dùng wildcard để không
+      phải khai báo tay từng file.
+
+      LƯU Ý: libz.so.1 / libzstd.so.1 gốc từ Termux có đuôi ".so.1" — build Release
+      (đóng gói AAB/APK ký thật) BẮT BUỘC mọi file trong lib/ phải có đúng đuôi ".so",
+      không chấp nhận ".so.1". Đã xử lý bằng patchelf (xem README mục Bước 0) để đổi
+      tên file thành ".so" đồng thời sửa lại tham chiếu SONAME bên trong các file phụ
+      thuộc — không còn file ".so.1" nào trong project nữa, wildcard dưới đây bắt đủ.
+    -->
+    <AndroidNativeLibrary Include="Platforms\Android\Resources\lib\arm64-v8a\*.so" Abi="arm64-v8a" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Maui.Controls" Version="8.0.*" />
+    <!-- Client nói chuyện với ADB Host Server (không tự thực hiện giao thức ADB thô
+         với thiết bị) — cần tự khởi động server bằng binary adb bundle ở trên,
+         xem AdbConnectionService.EnsureLocalAdbServerStartedAsync(). -->
+    <PackageReference Include="AdvancedSharpAdbClient" Version="3.5.15" />
+    <!-- Cần package riêng này để dùng ILoggingBuilder.AddDebug() trong MauiProgram.cs -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="8.0.0" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:models="clr-namespace:MauiRemoteAdb.Models"
+             x:Class="MauiRemoteAdb.Views.ConnectPage"
+             Title="Kết nối thiết bị">
+    <ScrollView>
+        <VerticalStackLayout Padding="24" Spacing="14">
+
+            <Label Text="Kết nối thiết bị (adb tcpip)" FontAttributes="Bold" />
+            <Label Text="Thiết bị B cần đã cắm dây 1 lần và chạy 'adb tcpip 5555' trước đó."
+                   FontSize="12" TextColor="Gray" />
+            <Entry x:Name="ConnectIpEntry" Placeholder="IP hoặc domain (vd demoai.ddns.net)" />
+            <Entry x:Name="ConnectPortEntry" Placeholder="Port (vd 5555)" Keyboard="Numeric" />
+            <Button Text="Kết nối &amp; Bắt đầu Remote" Clicked="OnConnectClicked" />
+
+            <Label x:Name="StatusLabel" TextColor="Gray" />
+
+            <BoxView HeightRequest="1" Color="LightGray" Margin="0,10" />
+
+            <Grid ColumnDefinitions="*,Auto">
+                <Label Grid.Column="0" Text="Lịch sử kết nối" FontAttributes="Bold" VerticalOptions="Center" />
+                <Button Grid.Column="1" Text="Xóa hết" FontSize="12" Clicked="OnClearHistoryClicked"
+                        BackgroundColor="Transparent" TextColor="Red" />
+            </Grid>
+
+            <CollectionView x:Name="HistoryList" ItemsSource="{Binding}">
+                <CollectionView.EmptyView>
+                    <Label Text="Chưa có lịch sử kết nối nào." TextColor="Gray" Padding="0,10" />
+                </CollectionView.EmptyView>
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="models:ConnectionHistoryItem">
+                        <Grid Padding="0,8" ColumnDefinitions="*,Auto">
+                            <Grid.GestureRecognizers>
+                                <TapGestureRecognizer Tapped="OnHistoryItemTapped" CommandParameter="{Binding}" />
+                            </Grid.GestureRecognizers>
+                            <VerticalStackLayout Grid.Column="0">
+                                <Label Text="{Binding DisplayText}" FontAttributes="Bold" />
+                                <Label Text="{Binding DisplaySubText}" FontSize="11" TextColor="Gray" />
+                            </VerticalStackLayout>
+                            <Button Grid.Column="1" Text="✕" WidthRequest="40" HeightRequest="40" Padding="0"
+                                    BackgroundColor="Transparent" TextColor="Red"
+                                    Clicked="OnDeleteHistoryItemClicked" CommandParameter="{Binding}" />
+                        </Grid>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

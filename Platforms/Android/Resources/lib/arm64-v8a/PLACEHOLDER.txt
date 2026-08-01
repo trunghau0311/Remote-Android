@@ -1,0 +1,17 @@
+Đặt đúng 9 file sau vào thư mục này (lấy qua Termux, xem README Bước 0):
+
+  libadb.so          <- đổi tên từ file "adb"
+  libc++_shared.so
+  libprotobuf.so
+  libfmt.so
+  libbrotlidec.so
+  libbrotlienc.so
+  liblz4.so
+  libz.so.1           <- GIỮ NGUYÊN đuôi ".so.1", KHÔNG đổi thành ".so"
+  libzstd.so.1         <- GIỮ NGUYÊN đuôi ".so.1", KHÔNG đổi thành ".so"
+
+Danh sách này đã được khai báo tường minh trong MauiRemoteAdb.csproj
+(ItemGroup AndroidNativeLibrary) — không cần sửa gì thêm ở đó, chỉ cần đặt
+đúng tên file như trên vào thư mục này.
+
+File PLACEHOLDER.txt này không ảnh hưởng build, có thể xóa sau khi đã đủ file thật.

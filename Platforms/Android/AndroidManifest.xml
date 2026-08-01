@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:allowBackup="true" android:icon="@mipmap/appicon"
+                 android:supportsRtl="true"></application>
+
+    <!-- Bắt buộc: mở kết nối TCP tới adbd trên thiết bị B (qua Wi-Fi/LAN) -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
+    <!-- Nếu thiết bị A và B cùng mạng LAN nhưng traffic không mã hóa (cleartext),
+         Android 9+ mặc định chặn cleartext HTTP nhưng socket TCP thô thường không
+         bị chặn bởi networkSecurityConfig trừ khi bạn cấu hình riêng. -->
+</manifest>

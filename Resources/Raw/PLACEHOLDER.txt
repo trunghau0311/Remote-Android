@@ -1,0 +1,13 @@
+Đặt file scrcpy-server.jar vào thư mục này trước khi build.
+
+Cách lấy file:
+1. Tải bản release chính thức tại https://github.com/Genymobile/scrcpy/releases
+   (ví dụ scrcpy-win64-v4.1.zip)
+2. Giải nén, tìm file tên "scrcpy-server" (KHÔNG có đuôi .jar trong bản release)
+3. Copy và đổi tên file đó thành "scrcpy-server.jar", đặt vào đúng thư mục này
+   (Resources/Raw/scrcpy-server.jar)
+4. Mở Services/ScrcpyServerLauncher.cs, sửa hằng số ScrcpyVersion cho khớp
+   ĐÚNG version bạn vừa tải (vd "4.1") — sai version server sẽ crash khi start.
+
+File PLACEHOLDER.txt này chỉ để nhắc việc, đã được loại khỏi build qua Remove
+trong MauiRemoteAdb.csproj — có thể xóa sau khi đã thêm scrcpy-server.jar thật.
