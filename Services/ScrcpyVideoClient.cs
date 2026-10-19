@@ -61,7 +61,7 @@ public class ScrcpyVideoClient : IAsyncDisposable
         await ReadExactAsync(codecBuf, token);
         var fourCc = System.Text.Encoding.ASCII.GetString(codecBuf);
 
-        // QUAN TRỌNG (đã xác nhận qua tài liệu chính thức scrcpy v4.0/4.1 develop.md):
+        // QUAN TRỌNG (đã xác nhận qua tài liệu chính thức scrcpy v4.0/4.1 develop.md — không đổi ở v5.0.1):
         // đây là 1 "session packet" dài 12 BYTE, không phải 8 byte như bản cũ từng viết sai:
         //   byte 0-3: cờ (bit cao nhất = 1 đánh dấu "session packet", phân biệt với "media
         //             packet" sau này khi đọc frame — xem thêm ghi chú trong ReadFramesAsync)
@@ -95,7 +95,7 @@ public class ScrcpyVideoClient : IAsyncDisposable
 
             // Bit cao nhất của byte đầu tiên phân biệt "session packet" (đổi kích thước,
             // thường do xoay màn hình) với "media packet" (frame video bình thường) —
-            // theo đúng tài liệu chính thức scrcpy v4.0/4.1. Session packet KHÔNG có dữ
+            // theo đúng tài liệu chính thức scrcpy v4.0/4.1 (giữ nguyên ở v5.0.1). Session packet KHÔNG có dữ
             // liệu payload theo sau — nếu đọc nhầm nó thành media packet, packet size sẽ
             // là số rác, làm hỏng toàn bộ việc đọc frame từ đó về sau.
             bool isSessionPacket = (header[0] & 0b1000_0000) != 0;

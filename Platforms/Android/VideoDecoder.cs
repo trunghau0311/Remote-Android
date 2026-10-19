@@ -1,82 +1,161 @@
 using Android.Media;
+using Android.OS;
 using Android.Views;
 using MauiRemoteAdb.Services;
-using Java.Nio;
 
 namespace MauiRemoteAdb.Platforms.Android;
 
 /// <summary>
 /// Bọc Android.Media.MediaCodec để giải mã H264 (Annex-B) nhận từ ScrcpyVideoClient
-/// và render trực tiếp lên một Surface (thường lấy từ SurfaceView/TextureView trong XAML).
-/// Dùng decode phần cứng => độ trễ thấp hơn nhiều so với decode phần mềm (FFmpeg-sharp...).
+/// và render trực tiếp lên một Surface (SurfaceView).
+///
+/// Thiết kế:
+///  - Input (Feed) chạy trên thread đọc socket; output được 1 thread RIÊNG xả liên tục
+///    -> frame hiện ngay khi giải mã xong, không phải chờ tới khi frame kế tiếp tới
+///    (bản cũ chỉ xả output ngay sau khi queue input với timeout 0 => luôn trễ ≥ 1 frame,
+///    và frame cuối của màn hình tĩnh có thể không bao giờ được hiển thị).
+///  - Nhận SPS/PPS (config packet) đã cache sẵn ngay lúc Configure — server scrcpy CHỈ
+///    gửi config packet 1 lần khi encoder khởi động; nếu decoder được tạo muộn hơn (do
+///    chờ SurfaceView layout) mà không có SPS/PPS thì sẽ không bao giờ ra hình (màn đen).
+///  - Bỏ các frame P/B cho tới khi gặp keyframe đầu tiên -> không bị hình vỡ khối rác.
 /// </summary>
 public class VideoDecoder : IDisposable
 {
-    private MediaCodec? _codec;
-    private bool _configured;
-    private volatile bool _disposed;
+    private const string MimeAvc = "video/avc";
 
-    public void Configure(Surface outputSurface, int width, int height)
+    private readonly object _inputLock = new();
+    private MediaCodec? _codec;
+    private Thread? _outputThread;
+    private volatile bool _disposed;
+    private bool _waitingForKeyFrame = true;
+
+    public int Width { get; private set; }
+    public int Height { get; private set; }
+
+    /// <summary>Số frame đã render thật lên Surface (dùng để debug/kiểm tra "có hình chưa").</summary>
+    public long RenderedFrames => Interlocked.Read(ref _renderedFrames);
+    private long _renderedFrames;
+
+    /// <param name="configPacket">SPS/PPS đã cache từ server (có thể null nếu chưa nhận được).</param>
+    public void Configure(Surface outputSurface, int width, int height, byte[]? configPacket)
     {
-        _codec = MediaCodec.CreateDecoderByType("video/avc"); // avc = H264
-        var format = MediaFormat.CreateVideoFormat("video/avc", width, height);
+        Width = width;
+        Height = height;
+
+        _codec = MediaCodec.CreateDecoderByType(MimeAvc);
+        var format = MediaFormat.CreateVideoFormat(MimeAvc, width, height);
+
+        // Giảm độ trễ: yêu cầu decoder chạy ở chế độ realtime / low-latency nếu hỗ trợ.
+        format.SetInteger(MediaFormat.KeyPriority, 0); // 0 = realtime
+        if (Build.VERSION.SdkInt >= BuildVersionCodes.R)
+            format.SetInteger(MediaFormat.KeyLowLatency, 1);
+
         _codec.Configure(format, outputSurface, null, MediaCodecConfigFlags.None);
         _codec.Start();
-        _configured = true;
+
+        _outputThread = new Thread(OutputLoop) { IsBackground = true, Name = "VideoDecoderOutput" };
+        _outputThread.Start();
+
+        if (configPacket is { Length: > 0 })
+            QueueInput(configPacket, 0, MediaCodecBufferFlags.CodecConfig);
     }
 
-    /// <summary>
-    /// Đưa 1 frame H264 Annex-B (bao gồm cả frame cấu hình SPS/PPS đầu tiên) vào decoder.
-    /// Không cần tự parse NAL — MediaCodec ở chế độ Surface tự render khi ReleaseOutputBuffer(true).
-    /// </summary>
+    /// <summary>Đưa 1 packet H264 Annex-B vào decoder (gọi từ thread đọc socket).</summary>
     public void Feed(VideoFrame frame)
     {
-        // QUAN TRỌNG: PumpFramesAsync chạy trên background thread khác với UI thread —
-        // nếu OnDisappearing() (UI thread) gọi Dispose() đúng lúc background thread đang
-        // Feed(), gọi vào MediaCodec đã Release() sẽ crash NATIVE (không bắt được bằng
-        // try/catch C#, làm văng cả app ngay lập tức) — chặn sớm bằng cờ _disposed.
-        if (_disposed || !_configured || _codec is null) return;
+        if (_disposed || _codec is null) return;
 
-        // QUAN TRỌNG: KHÔNG được bỏ frame một cách âm thầm — đặc biệt là frame SPS/PPS
-        // hoặc keyframe đầu tiên, thiếu nó decoder sẽ giải mã sai hoàn toàn (hình ảnh vỡ
-        // vụn, nhiều khối màu rác — đúng hiện tượng quan sát được thực tế) cho tới khi có
-        // keyframe kế tiếp (có thể rất lâu sau). Thử lại vài lần với timeout dài hơn thay
-        // vì bỏ ngay ở lần thử đầu.
-        int inputIndex = -1;
-        for (int i = 0; i < 5 && !_disposed; i++)
+        if (frame.IsConfigPacket)
         {
-            inputIndex = _codec.DequeueInputBuffer(20_000); // timeout 20ms mỗi lần thử
-            if (inputIndex >= 0) break;
+            // SPS/PPS mới (encoder vừa khởi động lại) -> keyframe sẽ theo ngay sau
+            _waitingForKeyFrame = true;
+            QueueInput(frame.Data, 0, MediaCodecBufferFlags.CodecConfig);
+            return;
         }
-        if (inputIndex < 0) return; // decoder vẫn bận sau nhiều lần thử — thực sự phải bỏ frame này
 
-        var inputBuffer = _codec.GetInputBuffer(inputIndex);
-        inputBuffer?.Clear();
-        inputBuffer?.Put(frame.Data);
-
-        var flags = frame.IsConfigPacket ? MediaCodecBufferFlags.CodecConfig : MediaCodecBufferFlags.None;
-        _codec.QueueInputBuffer(inputIndex, 0, frame.Data.Length, frame.PtsUs, flags);
-
-        var bufferInfo = new MediaCodec.BufferInfo();
-        int outputIndex = _codec.DequeueOutputBuffer(bufferInfo, 0);
-        while (outputIndex >= 0)
+        if (_waitingForKeyFrame)
         {
-            if (_disposed) return; // vừa bị Dispose() giữa chừng — không ReleaseOutputBuffer nữa
-            // true => render thẳng lên Surface đã Configure, không cần đọc byte ra tay
-            _codec.ReleaseOutputBuffer(outputIndex, render: true);
-            outputIndex = _codec.DequeueOutputBuffer(bufferInfo, 0);
+            if (!frame.IsKeyFrame) return; // chưa có keyframe thì decode cũng chỉ ra rác
+            _waitingForKeyFrame = false;
+        }
+
+        QueueInput(frame.Data, frame.PtsUs, MediaCodecBufferFlags.None);
+    }
+
+    private void QueueInput(byte[] data, long ptsUs, MediaCodecBufferFlags flags)
+    {
+        lock (_inputLock)
+        {
+            if (_disposed || _codec is null) return;
+            try
+            {
+                int inputIndex = -1;
+                for (int i = 0; i < 5 && !_disposed; i++)
+                {
+                    inputIndex = _codec.DequeueInputBuffer(20_000); // 20ms mỗi lần thử
+                    if (inputIndex >= 0) break;
+                }
+                if (inputIndex < 0)
+                {
+                    // Decoder quá tải -> buộc phải bỏ frame; chờ keyframe tiếp theo để tránh hình rác
+                    if (flags != MediaCodecBufferFlags.CodecConfig) _waitingForKeyFrame = true;
+                    return;
+                }
+
+                var inputBuffer = _codec.GetInputBuffer(inputIndex);
+                if (inputBuffer is null) return;
+                inputBuffer.Clear();
+                inputBuffer.Put(data);
+                _codec.QueueInputBuffer(inputIndex, 0, data.Length, ptsUs, flags);
+            }
+            catch (Java.Lang.IllegalStateException ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[VideoDecoder] QueueInput lỗi: {ex.Message}");
+            }
+        }
+    }
+
+    private void OutputLoop()
+    {
+        var info = new MediaCodec.BufferInfo();
+        while (!_disposed)
+        {
+            try
+            {
+                var codec = _codec;
+                if (codec is null) break;
+                int index = codec.DequeueOutputBuffer(info, 10_000); // 10ms
+                if (index >= 0)
+                {
+                    codec.ReleaseOutputBuffer(index, render: !_disposed);
+                    Interlocked.Increment(ref _renderedFrames);
+                }
+                // index < 0: TRY_AGAIN_LATER / OUTPUT_FORMAT_CHANGED / ... -> chỉ cần lặp tiếp
+            }
+            catch (Exception ex)
+            {
+                if (!_disposed)
+                    System.Diagnostics.Debug.WriteLine($"[VideoDecoder] OutputLoop lỗi: {ex.Message}");
+                break;
+            }
         }
     }
 
     public void Dispose()
     {
+        if (_disposed) return;
         _disposed = true;
-        try
+
+        // Chờ thread output thoát (nó chỉ block tối đa 10ms mỗi vòng) TRƯỚC khi Release,
+        // tránh gọi vào MediaCodec đã release => crash native không bắt được.
+        try { _outputThread?.Join(500); } catch { }
+
+        lock (_inputLock)
         {
-            _codec?.Stop();
+            try { _codec?.Stop(); } catch { /* codec có thể đã ở trạng thái lỗi */ }
+            try { _codec?.Release(); } catch { }
+            _codec?.Dispose();
+            _codec = null;
         }
-        catch { /* codec có thể đã ở trạng thái lỗi, bỏ qua khi dispose */ }
-        _codec?.Release();
-        _codec?.Dispose();
     }
 }

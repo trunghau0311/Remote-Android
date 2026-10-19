@@ -13,10 +13,10 @@ public class ScrcpyServerLauncher
     private const string LogPath = "/data/local/tmp/scrcpy-server.log";
     private const string ScriptPath = "/data/local/tmp/start-scrcpy.sh";
     // PHẢI khớp CHÍNH XÁC với version file scrcpy-server.jar bạn nhúng vào Resources/Raw.
-    // Ví dụ: nếu bạn tải "scrcpy-win64-v4.1.zip" từ
-    // https://github.com/Genymobile/scrcpy/releases thì để "4.1".
+    // Ví dụ: nếu bạn tải "scrcpy-win64-v5.0.1.zip" từ
+    // https://github.com/Genymobile/scrcpy/releases thì để "5.0.1".
     // SAI version này sẽ khiến server crash ngay khi start.
-    private const string ScrcpyVersion = "4.1";
+    private const string ScrcpyVersion = "5.0.1";
 
     private readonly AdbConnectionService _adb;
 

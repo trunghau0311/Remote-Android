@@ -17,6 +17,7 @@ public class RemoteSurfaceViewHandler : ViewHandler<RemoteSurfaceView, global::A
 
     private int _videoWidth;
     private int _videoHeight;
+    private bool _gestureActive; // đang có 1 cử chỉ (đã Down, chưa Up) gửi sang máy B
 
     public RemoteSurfaceViewHandler() : base(Mapper) { }
 
@@ -53,30 +54,55 @@ public class RemoteSurfaceViewHandler : ViewHandler<RemoteSurfaceView, global::A
         float touchX = e.Event.GetX();
         float touchY = e.Event.GetY();
 
-        // Kiểm tra xem chạm có nằm trong vùng video hiển thị hay không
-        // (bỏ qua các phần letterbox - viền đen ở các cạnh)
-        if (touchX < offsetX || touchY < offsetY ||
-            touchX >= offsetX + displayWidth || touchY >= offsetY + displayHeight)
+        var actionMasked = e.Event.ActionMasked;
+
+        // Chỉ BẮT ĐẦU 1 cử chỉ khi ngón tay đặt xuống bên trong vùng video (bỏ qua viền
+        // đen letterbox). Nhưng một khi cử chỉ đã bắt đầu, PHẢI theo dõi tới cùng kể cả
+        // khi ngón tay trượt ra ngoài vùng hiển thị — tọa độ được kẹp (clamp) về mép
+        // video, và sự kiện nhấc tay (Up/Cancel) LUÔN được gửi đi. Bản cũ bỏ qua mọi sự
+        // kiện ngoài vùng video => máy B nhận Down mà không bao giờ nhận Up => vuốt
+        // chưa hết trang mà kéo ra ngoài thì màn hình máy B "đứng" giữa chừng.
+        bool insideVideo = touchX >= offsetX && touchY >= offsetY &&
+                           touchX < offsetX + displayWidth && touchY < offsetY + displayHeight;
+
+        if (actionMasked == MotionEventActions.Down)
+        {
+            if (!insideVideo)
+            {
+                e.Handled = true;
+                return;
+            }
+            _gestureActive = true;
+            // Không cho view cha (ScrollView/Grid/gesture của MAUI) cướp chuỗi sự kiện
+            // giữa chừng — nếu bị cướp sẽ chỉ nhận Cancel và cử chỉ bị cắt ngang.
+            sv.Parent?.RequestDisallowInterceptTouchEvent(true);
+        }
+        else if (!_gestureActive)
         {
             e.Handled = true;
             return;
         }
 
-        // Tính tọa độ tương đối so với vị trí bắt đầu của video hiển thị
-        float relativeX = (touchX - (float)offsetX) / displayWidth;
-        float relativeY = (touchY - (float)offsetY) / displayHeight;
+        // Tính tọa độ tương đối so với vị trí bắt đầu của video hiển thị, kẹp vào [0, 1]
+        float relativeX = Math.Clamp((touchX - (float)offsetX) / displayWidth, 0f, 1f);
+        float relativeY = Math.Clamp((touchY - (float)offsetY) / displayHeight, 0f, 1f);
 
-        // Clamp vào khoảng [0, 1]
-        relativeX = Math.Clamp(relativeX, 0f, 1f);
-        relativeY = Math.Clamp(relativeY, 0f, 1f);
-
-        TouchPhase phase = e.Event.Action switch
+        TouchPhase phase;
+        switch (actionMasked)
         {
-            MotionEventActions.Down => TouchPhase.Down,
-            MotionEventActions.Move => TouchPhase.Move,
-            MotionEventActions.Up => TouchPhase.Up,
-            _ => TouchPhase.Move,
-        };
+            case MotionEventActions.Down:
+                phase = TouchPhase.Down;
+                break;
+            case MotionEventActions.Up:
+            case MotionEventActions.Cancel: // bị hệ thống/view cha hủy => vẫn phải nhấc tay bên máy B
+                phase = TouchPhase.Up;
+                _gestureActive = false;
+                sv.Parent?.RequestDisallowInterceptTouchEvent(false);
+                break;
+            default:
+                phase = TouchPhase.Move;
+                break;
+        }
 
         VirtualView.RaiseTouched(new RemoteTouchEventArgs(relativeX, relativeY, phase));
         e.Handled = true;
@@ -104,6 +130,9 @@ public class RemoteSurfaceViewHandler : ViewHandler<RemoteSurfaceView, global::A
             _handler.VirtualView.RaiseSurfaceReady(holder.Surface!, width, height);
         }
 
-        public void SurfaceDestroyed(ISurfaceHolder holder) { }
+        public void SurfaceDestroyed(ISurfaceHolder holder)
+        {
+            _handler.VirtualView?.RaiseSurfaceDestroyed();
+        }
     }
 }

@@ -13,6 +13,11 @@ public class RemoteSurfaceView : View
     /// <summary>Bắn ra khi người dùng chạm lên bề mặt, tọa độ đã quy đổi sang 0..1 (tỉ lệ tương đối).</summary>
     public event EventHandler<RemoteTouchEventArgs>? Touched;
 
+    /// <summary>Bắn ra khi Surface native bị hủy (app xuống nền, xoay màn hình...) — phải bỏ decoder đang render vào nó.</summary>
+    public event EventHandler? SurfaceDestroyed;
+
+    internal void RaiseSurfaceDestroyed() => SurfaceDestroyed?.Invoke(this, EventArgs.Empty);
+
     internal void RaiseSurfaceReady(object platformSurface, int width, int height)
         => SurfaceReady?.Invoke(this, new SurfaceReadyEventArgs(platformSurface, width, height));
 

@@ -14,7 +14,7 @@ public partial class RemoteScreenPage : ContentPage
     private int _lastVideoHeight;
     private bool _hasAutoDetectedRotation;  // Flag để tránh re-trigger auto rotation
 #if ANDROID
-    private VideoDecoder? _decoder;
+    private volatile VideoDecoder? _decoder; // đọc từ thread socket, ghi từ UI thread
     private global::Android.Views.Surface? _lastSurface;
 #endif
 
@@ -29,6 +29,7 @@ public partial class RemoteScreenPage : ContentPage
         NavigationPage.SetHasNavigationBar(this, false);
 
         Surface.SurfaceReady += OnSurfaceReady;
+        Surface.SurfaceDestroyed += OnSurfaceDestroyed;
         Surface.Touched += OnSurfaceTouched;
         _session.FrameReceived += OnFrameReceived;
         _session.ResolutionChanged += OnResolutionChanged;
@@ -201,6 +202,16 @@ public partial class RemoteScreenPage : ContentPage
                 AutoDetectRotation(size.Width, size.Height);
             }
             UpdateSurfaceAspectRatio();
+
+#if ANDROID
+            // Thiết bị B xoay màn hình -> encoder khởi động lại với kích thước mới.
+            // Tạo lại decoder theo kích thước mới (bản cũ không làm việc này => hình méo/đen sau khi xoay).
+            if (_lastSurface is not null && _decoder is not null &&
+                (_decoder.Width != size.Width || _decoder.Height != size.Height))
+            {
+                RecreateDecoder(_lastSurface, size.Width, size.Height);
+            }
+#endif
         });
     }
 
@@ -209,59 +220,25 @@ public partial class RemoteScreenPage : ContentPage
 #if ANDROID
         try
         {
-            // Reset flag để lần đầu tiên nhận video có thể auto-detect rotation
-            _hasAutoDetectedRotation = false;
-
-            // DeviceMeta có thể null vài mili-giây đầu nếu SurfaceReady bắn ra trước khi
-            // handshake video xong — trong thực tế nên chờ cả 2 điều kiện trước khi Configure.
+            // Page chỉ được push SAU khi StartAsync() xong nên DeviceMeta luôn có ở đây.
             if (_session.DeviceMeta is null) return;
 
             var androidSurface = (global::Android.Views.Surface)e.PlatformSurface;
+            int videoW = _session.DeviceMeta.Width;
+            int videoH = _session.DeviceMeta.Height;
 
-            // Kiểm tra xem Surface (vật lý) có thay đổi hay không
-            bool surfaceChanged = _lastSurface != androidSurface;
+            bool surfaceChanged = !ReferenceEquals(_lastSurface, androidSurface);
+            bool sizeChanged = _decoder is null || _decoder.Width != videoW || _decoder.Height != videoH;
 
-            // Lấy resolution từ _lastVideoWidth/Height (được set bởi OnResolutionChanged hoặc lần init)
-            int currentVideoWidth = _lastVideoWidth > 0 ? _lastVideoWidth : _session.DeviceMeta.Width;
-            int currentVideoHeight = _lastVideoHeight > 0 ? _lastVideoHeight : _session.DeviceMeta.Height;
-
-            bool resolutionChanged = currentVideoWidth != _session.DeviceMeta.Width ||
-                                     currentVideoHeight != _session.DeviceMeta.Height;
-
-            System.Diagnostics.Debug.WriteLine(
-                $"[OnSurfaceReady] surfaceChanged={surfaceChanged}, resolutionChanged={resolutionChanged} " +
-                $"(DeviceMeta: {_session.DeviceMeta.Width}x{_session.DeviceMeta.Height}, " +
-                $"Current: {currentVideoWidth}x{currentVideoHeight})");
-
-            // Nếu Surface cũ giống Surface mới + Resolution không thay đổi → không cần reconfigure
-            // (chỉ là resize XAML layout, MediaCodec tự handle)
-            if (!surfaceChanged && !resolutionChanged && _decoder is not null)
-            {
-                System.Diagnostics.Debug.WriteLine(
-                    "[OnSurfaceReady] Surface/resolution không đổi, bỏ qua reconfigure");
+            // SurfaceChanged cũng bắn ra khi chỉ đổi kích thước layout (letterbox) —
+            // lúc đó MediaCodec tự scale, KHÔNG cần tạo lại decoder.
+            if (!surfaceChanged && !sizeChanged)
                 return;
-            }
-
-            // Surface hoặc resolution thay đổi → dispose decoder cũ + tạo mới
-            if (_decoder is not null)
-            {
-                System.Diagnostics.Debug.WriteLine(
-                    $"[OnSurfaceReady] Disposing decoder cũ...");
-                _decoder.Dispose();
-                _decoder = null;
-            }
 
             _lastSurface = androidSurface;
-            _lastVideoWidth = _session.DeviceMeta.Width;
-            _lastVideoHeight = _session.DeviceMeta.Height;
+            RecreateDecoder(androidSurface, videoW, videoH);
 
-            System.Diagnostics.Debug.WriteLine(
-                $"[OnSurfaceReady] Creating new decoder with {_session.DeviceMeta.Width}x{_session.DeviceMeta.Height}");
-
-            _decoder = new VideoDecoder();
-            _decoder.Configure(androidSurface, _session.DeviceMeta.Width, _session.DeviceMeta.Height);
-
-            AutoDetectRotation(_session.DeviceMeta.Width, _session.DeviceMeta.Height);
+            AutoDetectRotation(videoW, videoH);
             MainThread.BeginInvokeOnMainThread(UpdateSurfaceAspectRatio);
         }
         catch (Exception ex)
@@ -275,6 +252,39 @@ public partial class RemoteScreenPage : ContentPage
         }
 #endif
     }
+
+#if ANDROID
+    /// <summary>
+    /// Tạo decoder mới (kèm SPS/PPS đã cache), gắn vào trước rồi mới hủy cái cũ, sau đó
+    /// yêu cầu server gửi lại keyframe ngay — có hình gần như tức thì thay vì chờ tới
+    /// keyframe định kỳ (10 giây) hoặc đen màn vĩnh viễn nếu đã lỡ mất SPS/PPS.
+    /// </summary>
+    private void RecreateDecoder(global::Android.Views.Surface surface, int width, int height)
+    {
+        System.Diagnostics.Debug.WriteLine($"[RemoteScreenPage] Tạo decoder {width}x{height}");
+
+        var newDecoder = new VideoDecoder();
+        newDecoder.Configure(surface, width, height, _session.LastConfigPacket);
+
+        var old = _decoder;
+        _decoder = newDecoder;
+        old?.Dispose();
+
+        _ = _session.RequestKeyFrameAsync();
+    }
+
+    private void OnSurfaceDestroyed(object? sender, EventArgs e)
+    {
+        // Surface đã chết -> decoder render vào đó sẽ lỗi. Hủy luôn; khi Surface mới
+        // được tạo (SurfaceChanged), OnSurfaceReady sẽ tạo decoder mới + xin keyframe.
+        var old = _decoder;
+        _decoder = null;
+        _lastSurface = null;
+        old?.Dispose();
+    }
+#else
+    private void OnSurfaceDestroyed(object? sender, EventArgs e) { }
+#endif
 
     private void OnFrameReceived(object? sender, VideoFrame frame)
     {
@@ -317,8 +327,13 @@ public partial class RemoteScreenPage : ContentPage
 
     private async void CleanupOnDisappearing()
     {
+        // Gỡ đăng ký khỏi session — tránh page cũ vẫn nhận frame/sự kiện sau khi đã đóng.
+        _session.FrameReceived -= OnFrameReceived;
+        _session.ResolutionChanged -= OnResolutionChanged;
 #if ANDROID
-        _decoder?.Dispose();
+        var old = _decoder;
+        _decoder = null;
+        old?.Dispose();
 #endif
         await _session.StopAsync();
     }

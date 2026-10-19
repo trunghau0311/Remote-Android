@@ -115,12 +115,12 @@ MauiRemoteAdb/
 File này **không** có link tải riêng — nó nằm bên trong bản release desktop của scrcpy.
 
 1. Tải bản release chính thức (chỉ từ GitHub, không tải từ site khác):
-   `https://github.com/Genymobile/scrcpy/releases` — ví dụ `scrcpy-win64-v4.1.zip`
+   `https://github.com/Genymobile/scrcpy/releases` — ví dụ `scrcpy-win64-v5.0.1.zip`
 2. Giải nén, tìm file tên **`scrcpy-server`** (không có đuôi `.jar` trong bản release —
    xác nhận từ chính tác giả scrcpy tại github.com/Genymobile/scrcpy/issues/2506).
 3. Đổi tên thành `scrcpy-server.jar`, copy vào `Resources/Raw/scrcpy-server.jar` trong project.
 4. Mở `Services/ScrcpyServerLauncher.cs`, sửa `ScrcpyVersion` khớp đúng version bạn tải
-   (mặc định code đang để `"4.1"`).
+   (mặc định code đang để `"5.0.1"`).
 
 **Cách khác — build từ mã nguồn** (nếu không muốn tải bản desktop):
 ```bash
@@ -135,7 +135,7 @@ cd scrcpy/server
 Từ bản 3.x/4.x, scrcpy đã đổi khá nhiều (thêm audio stream, camera capture, flex
 display...). Mình đã thêm cờ `audio=false` để tránh server mở thêm socket ngoài dự
 tính, nhưng bạn **nên đối chiếu lại** `server/src/main/java/com/genymobile/scrcpy/`
-trong repo scrcpy đúng tag version mình dùng (ví dụ tag `v4.1`) trước khi chạy thật,
+trong repo scrcpy đúng tag version mình dùng (ví dụ tag `v5.0.1`) trước khi chạy thật,
 đặc biệt là class `DesktopConnection.java` (thứ tự mở socket) và `Server.java`
 (danh sách tham số dòng lệnh) — vì đây là phần rủi ro cao nhất trong toàn bộ code mẫu.
 

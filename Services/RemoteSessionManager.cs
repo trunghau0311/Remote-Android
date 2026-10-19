@@ -14,6 +14,13 @@ public class RemoteSessionManager : IAsyncDisposable
     private CancellationTokenSource? _readCts;
 
     public DeviceMeta? DeviceMeta { get; private set; }
+
+    /// <summary>
+    /// SPS/PPS gần nhất server gửi. Server CHỈ gửi gói này 1 lần mỗi khi encoder khởi
+    /// động — decoder tạo sau thời điểm đó phải lấy bản cache này, nếu không sẽ màn đen.
+    /// </summary>
+    public byte[]? LastConfigPacket => _lastConfigPacket;
+    private volatile byte[]? _lastConfigPacket;
     public event EventHandler<VideoFrame>? FrameReceived;
     public event EventHandler<string>? StatusChanged;
     public event EventHandler<(int Width, int Height)>? ResolutionChanged;
@@ -96,6 +103,7 @@ public class RemoteSessionManager : IAsyncDisposable
         _videoClient = null;
         _controlClient = null;
         DeviceMeta = null;
+        _lastConfigPacket = null;
 
         StatusChanged?.Invoke(this, "Đang đẩy scrcpy-server.jar lên thiết bị...");
         _launcher = new ScrcpyServerLauncher(Adb);
@@ -220,6 +228,7 @@ public class RemoteSessionManager : IAsyncDisposable
         {
             await foreach (var frame in _videoClient.ReadFramesAsync(token))
             {
+                if (frame.IsConfigPacket) _lastConfigPacket = frame.Data;
                 FrameReceived?.Invoke(this, frame);
             }
         }
@@ -237,6 +246,14 @@ public class RemoteSessionManager : IAsyncDisposable
         float x = (float)(relX * DeviceMeta.Width);
         float y = (float)(relY * DeviceMeta.Height);
         return _controlClient.SendTouchAsync(action, x, y, DeviceMeta.Width, DeviceMeta.Height);
+    }
+
+    /// <summary>Yêu cầu server gửi lại SPS/PPS + keyframe ngay (dùng khi vừa tạo decoder mới).</summary>
+    public async Task RequestKeyFrameAsync()
+    {
+        if (_controlClient is null) return;
+        try { await _controlClient.SendResetVideoAsync(); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[RemoteSessionManager] Reset video lỗi: {ex.Message}"); }
     }
 
     public Task SendKeyAsync(int androidKeyCode, AndroidMotionAction action)

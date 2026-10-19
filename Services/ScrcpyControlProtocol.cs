@@ -19,6 +19,7 @@ public class ScrcpyControlClient : IAsyncDisposable
     private const byte TypeInjectKeycode = 0;
     private const byte TypeInjectTouchEvent = 2;
     private const byte TypeInjectScrollEvent = 3;
+    private const byte TypeResetVideo = 17; // ControlMessage.TYPE_RESET_VIDEO (scrcpy v3+, vẫn đúng ở v5.0.1)
 
     private TcpClient? _tcp;
     private NetworkStream? _stream;
@@ -89,10 +90,24 @@ public class ScrcpyControlClient : IAsyncDisposable
         return SendRawAsync(buf.AsMemory(0, i), token);
     }
 
+    /// <summary>
+    /// Yêu cầu server khởi động lại encoder video -> server gửi ngay session packet +
+    /// SPS/PPS (config) + keyframe mới. Dùng khi decoder phía app vừa được tạo/tạo lại
+    /// để có hình ngay, thay vì chờ keyframe định kỳ (10 giây/lần).
+    /// </summary>
+    public Task SendResetVideoAsync(CancellationToken token = default)
+        => SendRawAsync(new byte[] { TypeResetVideo }, token);
+
+    private readonly SemaphoreSlim _writeLock = new(1, 1);
+
     private async Task SendRawAsync(ReadOnlyMemory<byte> data, CancellationToken token)
     {
         if (_stream is null) throw new InvalidOperationException("Chưa ConnectAsync.");
-        await _stream.WriteAsync(data, token);
+        // Nhiều nơi có thể gửi cùng lúc (touch từ UI thread, reset video từ nơi khác) —
+        // khóa để 2 message không bị ghi xen kẽ byte vào nhau trên cùng 1 socket.
+        await _writeLock.WaitAsync(token);
+        try { await _stream.WriteAsync(data, token); }
+        finally { _writeLock.Release(); }
     }
 
     private static void WriteBigEndianInt(byte[] buf, ref int i, int v)
