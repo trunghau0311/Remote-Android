@@ -3,8 +3,32 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:views="clr-namespace:MauiRemoteAdb.Views"
              x:Class="MauiRemoteAdb.Views.RemoteScreenPage"
-             Title="Remote Screen">
-    <Grid x:Name="RootGrid" RowDefinitions="*,Auto" ColumnDefinitions="*,Auto">
+             Title="Remote Screen"
+             BackgroundColor="Black">
+
+    <ContentPage.Resources>
+        <!-- Nút điều hướng tối giản: chỉ icon, nền trong suốt, không padding/margin.
+             Ghi đè MinimumWidth/HeightRequest=44 + Padding mặc định trong Styles.xaml
+             để thanh nút chỉ dày đúng 36dp. -->
+        <Style x:Key="NavButton" TargetType="Button">
+            <Setter Property="WidthRequest" Value="56" />
+            <Setter Property="HeightRequest" Value="36" />
+            <Setter Property="MinimumWidthRequest" Value="0" />
+            <Setter Property="MinimumHeightRequest" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="FontSize" Value="18" />
+            <Setter Property="TextColor" Value="White" />
+            <Setter Property="BackgroundColor" Value="Transparent" />
+            <Setter Property="BorderWidth" Value="0" />
+            <Setter Property="CornerRadius" Value="18" />
+        </Style>
+    </ContentPage.Resources>
+
+    <!-- Dọc: thanh nút nằm ngang ở hàng dưới (cao 36dp).
+         Ngang: thanh nút nằm dọc ở cột phải (rộng 36dp) — xem UpdateButtonBarLayout(). -->
+    <Grid x:Name="RootGrid" RowDefinitions="*,Auto" ColumnDefinitions="*,Auto"
+          RowSpacing="0" ColumnSpacing="0" Padding="0">
 
         <Grid x:Name="SurfaceContainer" Grid.Row="0" Grid.Column="0">
             <views:RemoteSurfaceView x:Name="Surface"
@@ -12,10 +36,14 @@
         </Grid>
 
         <FlexLayout x:Name="ButtonBar" Grid.Row="1" Grid.Column="0"
-                    JustifyContent="Center" AlignItems="Center" Padding="10">
-            <Button Text="◀ Back" Clicked="OnBackKeyClicked" Margin="4" />
-            <Button Text="⬤ Home" Clicked="OnHomeKeyClicked" Margin="4" />
-            <Button Text="▢ Recents" Clicked="OnRecentsKeyClicked" Margin="4" />
+                    JustifyContent="SpaceEvenly" AlignItems="Center" Padding="0">
+            <!-- Biểu tượng giống thanh điều hướng Android: ◁ Back, ○ Home, □ Recents -->
+            <Button Text="◁" Style="{StaticResource NavButton}" Clicked="OnBackKeyClicked"
+                    SemanticProperties.Description="Back" />
+            <Button Text="○" Style="{StaticResource NavButton}" Clicked="OnHomeKeyClicked"
+                    SemanticProperties.Description="Home" />
+            <Button Text="□" Style="{StaticResource NavButton}" Clicked="OnRecentsKeyClicked"
+                    SemanticProperties.Description="Recents" />
         </FlexLayout>
 
     </Grid>

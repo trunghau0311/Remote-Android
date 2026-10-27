@@ -50,8 +50,20 @@ public class VideoDecoder : IDisposable
         if (Build.VERSION.SdkInt >= BuildVersionCodes.R)
             format.SetInteger(MediaFormat.KeyLowLatency, 1);
 
-        _codec.Configure(format, outputSurface, null, MediaCodecConfigFlags.None);
-        _codec.Start();
+        try
+        {
+            _codec.Configure(format, outputSurface, null, MediaCodecConfigFlags.None);
+            _codec.Start();
+        }
+        catch
+        {
+            // Configure lỗi -> nhả MediaCodec ngay, không để rò rỉ/giữ chiếm Surface
+            try { _codec.Release(); } catch { }
+            _codec.Dispose();
+            _codec = null;
+            _disposed = true;
+            throw;
+        }
 
         _outputThread = new Thread(OutputLoop) { IsBackground = true, Name = "VideoDecoderOutput" };
         _outputThread.Start();
