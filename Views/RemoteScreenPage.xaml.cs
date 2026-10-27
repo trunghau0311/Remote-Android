@@ -11,6 +11,8 @@ public partial class RemoteScreenPage : ContentPage
     private readonly RemoteSessionManager _session;
     // Hướng video hiện tại của máy B (null = chưa biết). App A xoay theo MỖI LẦN giá trị này đổi.
     private bool? _videoIsLandscape;
+    // true = người dùng chủ động thoát trang (Back) -> mới dừng phiên khi OnDisappearing.
+    private bool _isClosing;
 #if ANDROID
     // Hướng màn hình app trước khi vào trang này — khôi phục lại khi thoát.
     private ScreenOrientation? _orientationBeforePage;
@@ -52,6 +54,7 @@ public partial class RemoteScreenPage : ContentPage
     /// </summary>
     protected override bool OnBackButtonPressed()
     {
+        _isClosing = true;
         Navigation.PopAsync();
         return true; // đã tự xử lý, không cần hành vi mặc định khác xử lý thêm
     }
@@ -61,7 +64,11 @@ public partial class RemoteScreenPage : ContentPage
         base.OnAppearing();
 #if ANDROID
         if (Platform.CurrentActivity is Android.App.Activity activity)
+        {
             _orientationBeforePage ??= activity.RequestedOrientation;
+            // Giữ màn hình sáng trong lúc remote — tránh máy A tự khóa màn hình giữa chừng.
+            activity.Window?.AddFlags(global::Android.Views.WindowManagerFlags.KeepScreenOn);
+        }
 #endif
         UpdateButtonBarLayout(); // đặt đúng layout ngay từ đầu, không chỉ chờ SizeChanged bắn ra
     }
@@ -69,11 +76,22 @@ public partial class RemoteScreenPage : ContentPage
     protected override void OnDisappearing()
     {
         base.OnDisappearing();
+
+        // OnDisappearing cũng có thể bắn ra khi app chỉ xuống nền (khóa màn hình, bấm Home)
+        // — lúc đó trang vẫn còn trong navigation stack. KHÔNG được dừng phiên, nếu không
+        // mở khóa máy lên là mất stream, phải thoát ra remote lại. Decoder đã tự được hủy
+        // ở OnSurfaceDestroyed và tạo lại ở OnSurfaceReady khi Surface xuất hiện lại.
+        if (!_isClosing && Navigation.NavigationStack.Contains(this))
+            return;
+
         CleanupOnDisappearing();
 #if ANDROID
-        // Khôi phục đúng hướng màn hình như trước khi vào trang (không ép cứng Portrait)
         if (Platform.CurrentActivity is Android.App.Activity activity)
+        {
+            // Khôi phục đúng hướng màn hình như trước khi vào trang (không ép cứng Portrait)
             activity.RequestedOrientation = _orientationBeforePage ?? ScreenOrientation.Unspecified;
+            activity.Window?.ClearFlags(global::Android.Views.WindowManagerFlags.KeepScreenOn);
+        }
 #endif
     }
 

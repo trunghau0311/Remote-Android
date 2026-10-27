@@ -218,7 +218,12 @@ public class RemoteSessionManager : IAsyncDisposable
             ResolutionChanged?.Invoke(this, size);
         };
 
-        _ = PumpFramesAsync(_readCts.Token);
+        // QUAN TRỌNG: chạy vòng đọc frame trên thread pool. StartAsync được await từ UI
+        // thread, nếu gọi thẳng PumpFramesAsync thì mọi continuation của await foreach
+        // (đọc socket + decoder.Feed chờ input buffer) đều chạy trên UI thread — khi socket
+        // có sẵn dữ liệu (game fps cao) vòng lặp chiếm UI thread liên tục nhiều giây => ANR.
+        var readToken = _readCts.Token;
+        _ = Task.Run(() => PumpFramesAsync(readToken));
     }
 
     private async Task PumpFramesAsync(CancellationToken token)
